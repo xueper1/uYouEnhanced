@@ -1,26 +1,39 @@
-name: Build and Release uYouEnhanced
+name: Build and Release uYouEnhanced (FIXED)
 
 on:
   workflow_dispatch:
     inputs:
       sdk_version:
+        description: "iOS SDK Version (use 17.5 / 18.0 / etc)"
         default: "17.5"
         required: true
+        type: string
+
       uyou_version:
+        description: "uYou Version"
         default: "3.0.4"
         required: true
+        type: string
+
       decrypted_youtube_url:
+        description: "Direct IPA URL"
         required: true
         type: string
+
       bundle_id:
         default: "com.google.ios.youtube"
         required: true
+        type: string
+
       app_name:
         default: "YouTube"
         required: true
+        type: string
+
       upload_artifact:
         default: false
         type: boolean
+
       create_release:
         default: true
         type: boolean
@@ -36,13 +49,14 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repo
+        uses: actions/checkout@v5
         with:
           path: main
           submodules: recursive
 
-      - name: Install deps
-        run: brew install ldid dpkg make wget jq
+      - name: Install dependencies
+        run: brew install ldid dpkg make wget gnu-sed jq
 
       - name: Setup Theos
         uses: actions/checkout@v5
@@ -51,33 +65,31 @@ jobs:
           path: theos
           submodules: recursive
 
-      - name: Set THEOS
+      - name: Set environment
         run: echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-
-      # 🔥 FIX: normal SDK install (NO broken repo)
-      - name: Setup SDK (manual fallback)
-        run: |
-          mkdir -p $THEOS/sdks
-          echo "Use preinstalled Xcode SDK"
 
       - name: Download IPA
         run: |
           wget -O YouTube.ipa "${{ inputs.decrypted_youtube_url }}"
           unzip -q YouTube.ipa -d app
 
-      - name: Get YouTube version
+      - name: Extract YouTube version
         run: |
           VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" app/Payload/YouTube.app/Info.plist)
           echo "YT_VERSION=$VERSION" >> $GITHUB_ENV
 
-      - name: Build tweak
+      - name: Prepare Makefile
         run: |
           cd main
 
-          sed -i "s/^BUNDLE_ID.*/BUNDLE_ID = ${{ inputs.bundle_id }}/" Makefile
-          sed -i "s/^DISPLAY_NAME.*/DISPLAY_NAME = ${{ inputs.app_name }}/" Makefile
-          sed -i "s/^export TARGET.*/export TARGET = iphone:clang:${{ inputs.sdk_version }}:14.0/" Makefile
+          gsed -i "s|^BUNDLE_ID.*|BUNDLE_ID = ${{ inputs.bundle_id }}|" Makefile
+          gsed -i "s|^DISPLAY_NAME.*|DISPLAY_NAME = ${{ inputs.app_name }}|" Makefile
+          gsed -i "s|^export TARGET.*|export TARGET = iphone:clang:${{ inputs.sdk_version }}:14.0|" Makefile
 
+      - name: Build tweak
+        run: |
+          cd main
+          make clean
           make package FINALPACKAGE=1
 
       - name: Upload artifact
@@ -87,9 +99,11 @@ jobs:
           name: uYouEnhanced
           path: main/packages/*.ipa
 
-      - name: Release
+      - name: Create Release
         if: ${{ inputs.create_release }}
         uses: softprops/action-gh-release@v2
         with:
-          files: main/packages/*.ipa
           tag_name: v${{ env.YT_VERSION }}-${{ inputs.uyou_version }}
+          name: v${{ env.YT_VERSION }}-${{ inputs.uyou_version }}
+          files: main/packages/*.ipa
+          draft: true
